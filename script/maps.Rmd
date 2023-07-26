@@ -22,6 +22,16 @@ implementation to use CI and a reproducible approach.
 
 The main idea despite the DevOps technicalities is to train the data gathering aspect of bike maps and build pipelines regarding this task.
 
+Set up the data directory to load preprocessed data:
+
+```{r}
+home_directory = Sys.getenv("HOME")
+
+working_directory = paste(home_directory, "/Documents/github/bicycle_maps/data", sep="")
+
+setwd(working_directory)
+```
+
 Write a function for setting up the theme configuration for the maps.
 
 ```{r}
@@ -109,24 +119,31 @@ as shapefile or geopackage. We need to convert them into a `data.frame`or a `tib
 
 ```{r}
 # Get the ZIP file from BKG
-url <- "https://daten.gdz.bkg.bund.de/produkte/vg/vg250_ebenen_0101/aktuell/vg250_01-01.utm32s.shape.ebenen.zip"
+# url <- "https://daten.gdz.bkg.bund.de/produkte/vg/vg250_ebenen_0101/aktuell/vg250_01-01.utm32s.shape.ebenen.zip"
 
-response <- GET(url)
+# response <- GET(url)
 
-if (response$status_code == 200) {
-  writeBin(response$content, "../data/shapefile.zip")
-} else {
-  stop("Could not download zip file")
-}
+# if (response$status_code == 200) {
+#   writeBin(response$content, "data/shapefile.zip")
+# } else {
+#   stop("Could not download zip file")
+# }
 
-# Unzip the file
-unzip(shapefile.zip)
+# # Unzip the file
+# unzip(shapefile.zip)
+# Zip file is preprocessed
+home_directory = Sys.getenv("HOME")
 
-# Download the shapefile
-municipalities <- st_read("shapefile.shp")
+working_directory = paste(home_directory, "/Documents/github/bicycle_maps/data", sep="")
+
+setwd(working_directory)
+
+# Get the municipality shapefile
+municipalities <- st_read("VG250_GEM.shp")
+# str(municipalities)
 
 # Convert the shapefile into a tibble
-municipalities_tb <- as_tibble(municipalities)
+municipalities_tb <- as_tibble(municipalities) %>% select(OBJID, GEN, geometry)
 
 # # filter the layer of interest
 # lower_48 <- us_states %>% 
@@ -137,7 +154,7 @@ In general we want to use the ggplot library to plot our data.
 
 ```{r}
 ggplot() + 
-  geom_sf(data = lower_48) +
+  geom_sf(data = municipalities_tb, aes(geometry = geometry)) +
   coord_sf(crs = st_crs("EPSG:25832")) +  # UTM 32N
   theme_roadtrip()
 ```

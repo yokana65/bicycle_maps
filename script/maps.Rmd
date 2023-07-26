@@ -1,0 +1,143 @@
+---
+title: "Building Bicycle Maps"
+author: "Johannes Wagner"
+date: "`r Sys.Date()`"
+---
+
+```{r, messages = FALSE}
+library(tidyverse)     # ggplot, dplyr, and friends
+library(sf)            # Handle spatial data in R in a tidy way
+library(tidygeocoder)  # Automated geocoding
+library(osrm)          # Access OSRM through R
+library(ggrepel)       # Nicer non-overlapping labels
+library(glue)          # Easier string interpolation
+library(scales)        # Nicer labeling functions
+library(patchwork)     # Combine plots nicely
+library(ggspatial)     # Nicer map features like scale bars
+library(httr)          # HTTP requests
+```
+
+This builds on the geocoding tutorial from [Andrew Heiss](https://www.andrewheiss.com/blog/2023/06/01/geocoding-routing-openstreetmap-r/) and extends its 
+implementation to use CI and a reproducible approach.
+
+The main idea despite the DevOps technicalities is to train the data gathering aspect of bike maps and build pipelines regarding this task.
+
+Write a function for setting up the theme configuration for the maps.
+
+```{r}
+theme_roadtrip <- function() {
+  theme_void(base_family = "Overpass Light") +
+    theme(
+      plot.title = element_text(family = "Overpass", face = "bold", hjust = 0.5),
+      strip.text = element_text(
+        family = "Overpass ExtraBold", face = "plain",
+        size = rel(1.1), hjust = 0.5)
+    )
+}
+
+# Make labels use Overpass by default
+update_geom_defaults("label_repel", 
+                     list(family = "Overpass",
+                          fontface = "plain"))
+update_geom_defaults("label", 
+                     list(family = "Overpass",
+                          fontface = "plain"))
+
+update_geom_defaults("text_repel", 
+                     list(family = "Overpass",
+                          fontface = "plain"))
+update_geom_defaults("text", 
+                     list(family = "Overpass",
+                          fontface = "plain"))
+
+# Yellowstone colors
+clrs <- NatParksPalettes::natparks.pals("Yellowstone")
+```
+
+We also want to define some general format functionality: 
+
+```{r}
+fmt_duration <- function(x) {
+  # Round to the nearest 15 minutes
+  n_seconds <- round(seconds(x * 60) / (15 * 60)) * (15 * 60)
+  n_seconds <- seconds_to_period(n_seconds)
+  
+  out <- map_chr(n_seconds, \(n) {
+    if (seconds(n) <= 59) {
+      # If this is less than an hour, don't format anything with hours
+      glue("{MM} minutes", MM = minute(n))
+    } else {
+      # I only want to format this as a number of hours. If the duration is
+      # longer than 24 hours, seconds_to_period() rolls over into days (i.e.
+      # seconds_to_period(60 * 60 * 24) returns "1d 0H 0M 0S"), and it shows
+      # zero hours. So we extract the day part of the period, multiply it by 24,
+      # and add it to the hour component that we want to display
+      extra_day_hours <- day(n) * 24
+  
+      glue("{HH} hour{s} {MM} minutes",
+        HH = scales::label_comma()(hour(n) + extra_day_hours),
+        MM = minute(n),
+        s = ifelse(hour(n) == 1, "", "s")
+      )
+    }
+  })
+  
+  return(out)
+}
+
+fmt_miles <- scales::label_number(accuracy = 10, suffix = " miles", big.mark = ",")
+
+miles_to_meters <- function(x) {
+  x * 1609.344
+}
+
+meters_to_miles <- function(x) {
+  x / 1609.344
+}
+
+km_to_miles <- function(x) {
+  meters_to_miles(x * 1000)
+}
+```
+
+## Community data
+
+This is something that has a multitude of sources depending on the national context. We will start with Germany and then try to extend it to the European context.
+
+In Germany municipality data is provided by the [BKG](https://gdz.bkg.bund.de/index.php/default/digitale-geodaten/verwaltungsgebiete/verwaltungsgebiete-1-250-000-stand-01-01-vg250-01-01.html) and can be downloaded
+as shapefile or geopackage. We need to convert them into a `data.frame`or a `tibble`.
+
+```{r}
+# Get the ZIP file from BKG
+url <- "https://daten.gdz.bkg.bund.de/produkte/vg/vg250_ebenen_0101/aktuell/vg250_01-01.utm32s.shape.ebenen.zip"
+
+response <- GET(url)
+
+if (response$status_code == 200) {
+  writeBin(response$content, "../data/shapefile.zip")
+} else {
+  stop("Could not download zip file")
+}
+
+# Unzip the file
+unzip(shapefile.zip)
+
+# Download the shapefile
+municipalities <- st_read("shapefile.shp")
+
+# Convert the shapefile into a tibble
+municipalities_tb <- as_tibble(municipalities)
+
+# # filter the layer of interest
+# lower_48 <- us_states %>% 
+#   filter(!(NAME %in% c("Alaska", "Hawaii", "Puerto Rico")))
+```
+
+In general we want to use the ggplot library to plot our data.
+
+```{r}
+ggplot() + 
+  geom_sf(data = lower_48) +
+  coord_sf(crs = st_crs("EPSG:25832")) +  # UTM 32N
+  theme_roadtrip()
+```

@@ -63,6 +63,16 @@ The function [] takes a list of locations as input. Please be careful to choose 
 places you want to visit.
 
 ```{r}
+geocode_locations -> function(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt")) {
+
+  part_vector <- seq(1, length(locations))
+
+  stops_to_geocode <- tibble(
+    part = part_vector,
+    location = location_vector
+  )
+
+}
 
 ```
 

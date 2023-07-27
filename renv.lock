@@ -1023,6 +1023,24 @@
       ],
       "Hash": "ba0165748eb593d7276567def5b2228e"
     },
+    "maptiles": {
+      "Package": "maptiles",
+      "Version": "0.5.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "curl",
+        "grDevices",
+        "graphics",
+        "png",
+        "sf",
+        "slippymath",
+        "terra",
+        "tools"
+      ],
+      "Hash": "d7986f6c10718e82a01c61e897385002"
+    },
     "memoise": {
       "Package": "memoise",
       "Version": "2.0.1",
@@ -1299,6 +1317,20 @@
       ],
       "Hash": "5e3c5dc0b071b21fa128676560dbe94d"
     },
+    "raster": {
+      "Package": "raster",
+      "Version": "3.6-23",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "Rcpp",
+        "methods",
+        "sp",
+        "terra"
+      ],
+      "Hash": "337d6d70f7d6bf78df236a5a53f09db0"
+    },
     "readr": {
       "Package": "readr",
       "Version": "2.1.4",
@@ -1574,6 +1606,20 @@
       ],
       "Hash": "e2111252a76984ca50bf8d6314348681"
     },
+    "slippymath": {
+      "Package": "slippymath",
+      "Version": "0.3.1",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "png",
+        "purrr",
+        "raster",
+        "stats"
+      ],
+      "Hash": "abdaf883004a4791545655d79ca3aae0"
+    },
     "sp": {
       "Package": "sp",
       "Version": "2.0-0",
@@ -1666,6 +1712,18 @@
       ],
       "Hash": "a1e56d84e94c41a03391aea66c32b732"
     },
+    "terra": {
+      "Package": "terra",
+      "Version": "1.7-39",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "Rcpp",
+        "methods"
+      ],
+      "Hash": "6037d18193ca3f16900646e773937094"
+    },
     "textshaping": {
       "Package": "textshaping",
       "Version": "0.3.6",
@@ -1751,6 +1809,27 @@
         "withr"
       ],
       "Hash": "79540e5fcd9e0435af547d885f184fd5"
+    },
+    "tidyterra": {
+      "Package": "tidyterra",
+      "Version": "0.4.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "cli",
+        "data.table",
+        "dplyr",
+        "ggplot2",
+        "magrittr",
+        "rlang",
+        "scales",
+        "sf",
+        "terra",
+        "tibble",
+        "tidyr"
+      ],
+      "Hash": "c50e45d8fd32d10e40ff6d9f03e22249"
     },
     "tidyverse": {
       "Package": "tidyverse",

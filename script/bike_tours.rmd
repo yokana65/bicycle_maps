@@ -1,0 +1,77 @@
+---
+title: "Building Bicycle Maps"
+author: "Johannes Wagner"
+date: "`r Sys.Date()`"
+---
+
+```{r, warning = FALSE, messages = FALSE}
+library(tidyverse)
+library(sf)
+library(tidygeocoder)
+library(osrm)
+library(maptiles)
+library(ggrepel)
+library(glue)
+library(rlang)
+library(scales)
+library(patchwork)
+library(tidyterra)
+library(ggspatial)
+library(httr)
+```
+
+## Loading the data
+
+At this point the package expects a shapefile for administrative boundaries. This data can be found
+with local or national authorities or on specialized websites like https://www.diva-gis.org/.
+
+The Shapefile has to be stored under `data/`in the project directory and needs to contain a column with
+a geometry, the administrative level of interest (for example districts) and a unique identifier for the 
+administrative units of interest.
+
+Addiotionally the CRS of the final map needs to be specified. The default value is WGS84.
+
+```{r}
+load_spatial_data <- function(name = "VG250_KRS", column = "SN_L", filter_by = c("14", "15", "16"), crs = 25832) {
+
+  dir <- getwd()
+  dir <- glue("{dir}/data/{name}.shp")
+
+  column <- ensym(column)
+
+  municipalities <- st_read(dir)
+
+  municipalities_tb <- as_tibble(municipalities) %>%
+    select(!!column, geometry) %>%
+    filter(!!column %in% filter_by)  
+  
+  municipalities_sf <- st_as_sf(municipalities_tb, crs = crs)
+
+  return(municipalities_sf)
+}
+```
+
+We write a test to see if the function does what we want:
+
+```{r}
+
+```
+
+## Providing a list of locations to visited
+
+The function [] takes a list of locations as input. Please be careful to choose unique identifiers for the
+places you want to visit.
+
+```{r}
+
+```
+
+
+## Geocoding
+
+```{r}
+
+```
+
+## Formating and Ploting
+

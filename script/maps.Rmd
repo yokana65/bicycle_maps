@@ -15,6 +15,8 @@ library(scales)        # Nicer labeling functions
 library(patchwork)     # Combine plots nicely
 library(ggspatial)     # Nicer map features like scale bars
 library(httr)          # HTTP requests
+library(tidyterra)     # Tidy interface to ggspatial
+library(maptiles)      # Get map tiles
 ```
 
 This builds on the geocoding tutorial from [Andrew Heiss](https://www.andrewheiss.com/blog/2023/06/01/geocoding-routing-openstreetmap-r/) and extends its 
@@ -86,18 +88,6 @@ fmt_duration <- function(x) {
 }
 
 fmt_km <- scales::label_number(accuracy = 1, suffix = " km", big.mark = ",")
-
-miles_to_meters <- function(x) {
-  x * 1609.344
-}
-
-meters_to_miles <- function(x) {
-  x / 1609.344
-}
-
-km_to_miles <- function(x) {
-  meters_to_miles(x * 1000)
-}
 ```
 
 ## Community data
@@ -134,6 +124,7 @@ municipalities <- st_read("VG250_KRS.shp")
 
 # Convert the shapefile into a tibble
 municipalities_tb <- as_tibble(municipalities) %>% select(OBJID, GEN, SN_L, geometry)
+
 
 # # filter the layer of interest
 # lower_48 <- us_states %>% 
@@ -189,6 +180,9 @@ For this example we want to filter out Sachsony (SN) and Thuringia (TH). We can 
 ```{r}
 municipalities_tb <- municipalities_tb %>% 
   filter(SN_L %in% c("14", "15", "16"))
+
+# add spatial object specifics
+municipalities_sf <- st_as_sf(municipalities_tb)
 ```
 
 
@@ -207,7 +201,7 @@ First we want to get our route by names of locations that we pass:
 
 ```{r}
 stops_to_geocode <- tribble(
-  ~direction,   ~day, ~location,
+  ~direction,   ~part, ~location,
   "There",      1,    "Leipzig",
   "There",      2,    "Lützen",
   "There",      3,    "Bothfeld, Lützen",
@@ -219,12 +213,12 @@ stops_to_geocode <- tribble(
   "There",      9,    "Groheringen",
   "There",      10,    "Bad Sulza",
   "There",      11,    "Auerstedt",
-  # "Back again", 1,    "Auerstedt",
-  # "Back again", 2,    "Bad Sulza",
-  # "Back again", 3,    "Sonnendorf, Bad Sulza",
-  # "Back again", 4,    "Jena",
-  # "Back again", 5,    "Halle",
-  # "Back again", 6,    "Leipzig"
+  "Back again", 1,    "Auerstedt",
+  "Back again", 2,    "Bad Sulza",
+  "Back again", 3,    "Sonnendorf, Bad Sulza",
+  "Back again", 4,    "Jena",
+  "Back again", 5,    "Halle",
+  "Back again", 6,    "Leipzig"
 )  %>% 
   mutate(direction = fct_inorder(direction))
 ```
@@ -350,8 +344,6 @@ Let's make the map a bit nicer to look at by highlighting the municipalities we 
 
 ```{r}
 # time to turn municialities into an sf object (prbly should have done this earlier)
-municipalities_sf <- st_as_sf(municipalities_tb)
-
 municipalities_highlighted <- municipalities_sf %>% 
   mutate(visited = geometry %in% municipalities_sf[all_stops_unique, ]$geometry)
 
@@ -410,5 +402,114 @@ ggplot() +
   coord_sf(crs = st_crs("EPSG:25832")) + 
   labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
   theme_roadtrip()
+
+```
+
+## Faceting and Zooming
+
+We can just use any colum to facet the map. For example the direction column:
+
+```{r}
+
+ggplot() +
+  geom_sf(data = municipalities_highlighted, aes(geometry = geometry, fill = visited)) +
+  geom_sf(data = routes_geocoded, color = clrs[1]) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = routes_geocoded,
+    aes(label = paste0(destination_location, " ", distance_text), geometry = destination_geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  scale_fill_manual(values = c("grey90", "grey70"), guide = "none") +
+  coord_sf(crs = st_crs("EPSG:25832")) + 
+  labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
+  theme_roadtrip() +
+  facet_wrap(vars(direction), ncol = 1)
+
+```
+
+The more desired result is a map that shows each part of the trip in detail. First we need to extract the route for the specific part of the trip:
+
+```{r}
+route_day1 <- routes_geocoded %>% 
+  filter(direction == "There", part == 1 | part == 2)
+```
+
+And then send it into a pipeline that constructs the desired zoom level with a bounding box:
+
+```{r}
+bbox_nice <- route_day1 %>% 
+  st_bbox() %>%  # Extract the bounding box of the coordinates
+  st_as_sfc() %>%  # Convert the bounding box matrix back to an sf object
+  st_buffer(10) %>%  # Add 10 km to all sides
+  st_transform("EPSG:25832") %>%  # Switch to UTM 32
+  st_bbox() 
+```
+
+The plot for the first part of the trip is now:
+
+```{r}
+
+ggplot() +
+  geom_sf(data = municipalities_highlighted, aes(geometry = geometry, fill = visited)) +
+  geom_sf(data = route_day1, color = clrs[1]) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = route_day1,
+    aes(label = paste0(origin_location, " ", distance_text), geometry = origin_geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  scale_fill_manual(values = c("grey90", "grey70"), guide = "none") +
+  coord_sf(
+    xlim = c(bbox_nice["xmin"], bbox_nice["xmax"]), 
+    ylim = c(bbox_nice["ymin"], bbox_nice["ymax"]),
+    crs = st_crs("EPSG:25832")
+  ) +
+    labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
+  theme_roadtrip() 
+```
+
+That is nice. We can now generalize the code, extract the routes to OSMAnd and use OSM data to display the route with actual mapping.
+
+## Get OSM Tiles
+
+We can make our specific maps more informative by adding OSM tiles. For this we need to use the `ggspatial` package.
+
+```{r}
+# Get maptiles per bbox to save memory
+dc <- get_tiles(bbox_nice, provider = "OpenStreetMap")
+# And finally plot with ggplot2 + tidyterra
+
+ggplot() +
+  geom_spatraster_rgb(data = dc) +
+  geom_sf(data = route_day1, color = clrs[1], size = 10) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = route_day1,
+    aes(label = distance_text, geometry = origin_geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  coord_sf(
+    xlim = c(bbox_nice["xmin"], bbox_nice["xmax"]), 
+    ylim = c(bbox_nice["ymin"], bbox_nice["ymax"]),
+    crs = st_crs("EPSG:25832")
+  ) +
+  labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
+  theme_roadtrip() 
 
 ```

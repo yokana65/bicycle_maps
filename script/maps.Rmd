@@ -15,6 +15,8 @@ library(scales)        # Nicer labeling functions
 library(patchwork)     # Combine plots nicely
 library(ggspatial)     # Nicer map features like scale bars
 library(httr)          # HTTP requests
+library(tidyterra)     # Tidy interface to ggspatial
+library(maptiles)      # Get map tiles
 ```
 
 This builds on the geocoding tutorial from [Andrew Heiss](https://www.andrewheiss.com/blog/2023/06/01/geocoding-routing-openstreetmap-r/) and extends its 
@@ -22,7 +24,7 @@ implementation to use CI and a reproducible approach.
 
 The main idea despite the DevOps technicalities is to train the data gathering aspect of bike maps and build pipelines regarding this task.
 
-Write a function for setting up the theme configuration for the maps.
+Write a function for setting up the theme configuration for the ggplot maps.
 
 ```{r}
 theme_roadtrip <- function() {
@@ -85,19 +87,7 @@ fmt_duration <- function(x) {
   return(out)
 }
 
-fmt_miles <- scales::label_number(accuracy = 10, suffix = " miles", big.mark = ",")
-
-miles_to_meters <- function(x) {
-  x * 1609.344
-}
-
-meters_to_miles <- function(x) {
-  x / 1609.344
-}
-
-km_to_miles <- function(x) {
-  meters_to_miles(x * 1000)
-}
+fmt_km <- scales::label_number(accuracy = 1, suffix = " km", big.mark = ",")
 ```
 
 ## Community data
@@ -109,35 +99,417 @@ as shapefile or geopackage. We need to convert them into a `data.frame`or a `tib
 
 ```{r}
 # Get the ZIP file from BKG
-url <- "https://daten.gdz.bkg.bund.de/produkte/vg/vg250_ebenen_0101/aktuell/vg250_01-01.utm32s.shape.ebenen.zip"
+# url <- "https://daten.gdz.bkg.bund.de/produkte/vg/vg250_ebenen_0101/aktuell/vg250_01-01.utm32s.shape.ebenen.zip"
 
-response <- GET(url)
+# response <- GET(url)
 
-if (response$status_code == 200) {
-  writeBin(response$content, "../data/shapefile.zip")
-} else {
-  stop("Could not download zip file")
-}
+# if (response$status_code == 200) {
+#   writeBin(response$content, "data/shapefile.zip")
+# } else {
+#   stop("Could not download zip file")
+# }
 
-# Unzip the file
-unzip(shapefile.zip)
+# # Unzip the file
+# unzip(shapefile.zip)
+# Zip file is preprocessed
+home_directory = Sys.getenv("HOME")
 
-# Download the shapefile
-municipalities <- st_read("shapefile.shp")
+working_directory = paste(home_directory, "/Documents/github/bicycle_maps/data", sep="")
+
+setwd(working_directory)
+
+# Get the municipality shapefile
+municipalities <- st_read("VG250_KRS.shp")
+# str(municipalities)
 
 # Convert the shapefile into a tibble
-municipalities_tb <- as_tibble(municipalities)
+municipalities_tb <- as_tibble(municipalities) %>% select(OBJID, GEN, SN_L, geometry)
+
 
 # # filter the layer of interest
 # lower_48 <- us_states %>% 
 #   filter(!(NAME %in% c("Alaska", "Hawaii", "Puerto Rico")))
 ```
 
+For europe, we could got to http://ec.europa.eu/eurostat/cache/GISCO/distribution/v2/nuts/geojson/NUTS_RG or use the eurostat package.
+
+```{r, eval=FALSE, message=FALSE, warning=FALSE}
+library(eurostat)
+
+data <- get_eurostat_geospatial(
+  output_class = "sf",
+  resolution = "60",
+  nuts_level = "all",
+  year = "2016",
+  cache = TRUE,
+  update_cache = FALSE,
+  cache_dir = NULL,
+  crs = "4326",
+  make_valid = FALSE
+)
+```
+
+We also want to select the area, where we want to map our route. One way is to use the SN_L column of the data set. This is a column that contains the name of the state.
+The List of federal states in Germany is: 
+01 - SH
+02 - HH
+03- NI
+04 - HB
+05 - NW
+06- HE
+07- RP
+08- BW
+09- BY
+10- SL
+11- BE
+12- BB
+13- MV
+14 - SN
+15 - ST
+16 - TH
+
+
+```{r}
+cols <- c("SN_L")
+municipalities_tb[cols] <- lapply(municipalities_tb[cols], factor) 
+summary(municipalities_tb$SN_L)
+```
+
+For this example we want to filter out Sachsony (SN) and Thuringia (TH). We can do this by using the `filter` function from the `dplyr` package.
+
+```{r}
+municipalities_tb <- municipalities_tb %>% 
+  filter(SN_L %in% c("14", "15", "16"))
+
+# add spatial object specifics
+municipalities_sf <- st_as_sf(municipalities_tb)
+```
+
+
 In general we want to use the ggplot library to plot our data.
 
 ```{r}
 ggplot() + 
-  geom_sf(data = lower_48) +
+  geom_sf(data = municipalities_tb, aes(geometry = geometry)) +
   coord_sf(crs = st_crs("EPSG:25832")) +  # UTM 32N
   theme_roadtrip()
+```
+
+## Routing
+
+First we want to get our route by names of locations that we pass:
+
+```{r}
+stops_to_geocode <- tribble(
+  ~direction,   ~part, ~location,
+  "There",      1,    "Leipzig",
+  "There",      2,    "Lützen",
+  "There",      3,    "Bothfeld, Lützen",
+  "There",      4,    "Kriechau, Weißenfels",
+  "There",      5,    "Weißenfels",
+  "There",      6,    "Eulau, Naumburg",
+  "There",      7,    "Naumburg",
+  "There",      8,    "Bad Kösen",
+  "There",      9,    "Groheringen",
+  "There",      10,    "Bad Sulza",
+  "There",      11,    "Auerstedt",
+  "Back again", 1,    "Auerstedt",
+  "Back again", 2,    "Bad Sulza",
+  "Back again", 3,    "Sonnendorf, Bad Sulza",
+  "Back again", 4,    "Jena",
+  "Back again", 5,    "Halle",
+  "Back again", 6,    "Leipzig"
+)  %>% 
+  mutate(direction = fct_inorder(direction))
+```
+
+We can now use the `geocode` package to retrieve the spatial data for our locations. Be aware that nomatim coordinates are in WGS 84 (EPSG:4326) and we need to transform them to UTM 32N (EPSG:25832) to be able to plot them on our map.
+
+```{r}
+stops_geocoded <- stops_to_geocode %>% 
+  geocode(location, method = "osm") %>%
+  filter(!is.na(long) & !is.na(lat)) %>%
+  st_as_sf(coords = c("long", "lat"), crs = st_crs("EPSG:4326"))
+```
+
+Remove the last line of our journay:
+
+```{r}
+all_stops_unique <- stops_geocoded %>% 
+  slice(1:(n() - 1))
+```
+
+Also lets do the reprojection:
+
+```{r}
+crs <- st_crs(municipalities_tb$geometry)
+all_stops_unique["geometry"] <- lapply(all_stops_unique["geometry"], st_transform, crs) 
+```
+
+## First Map
+
+```{r}
+ggplot() +
+  geom_sf(data = municipalities_tb, aes(geometry = geometry)) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = all_stops_unique,
+    aes(label = location, geometry = geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0,
+    max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  coord_sf(crs = st_crs("EPSG:25832")) +  
+  theme_roadtrip()
+```
+
+## Routing
+
+We can use the `osrmRoute()`function to connect a source point with a destination. The main thing to achieve is a **row per route** structure in our
+dataset.
+
+For this purpose, we need to wrangle our data a bit. First we want to use lead() to make a shifted copy of our geometries:
+```{r}
+routes_raw <- stops_geocoded %>% 
+  rename(
+    origin_geometry = geometry,
+    origin_location = location
+  ) %>% 
+  mutate(
+    destination_geometry = lead(origin_geometry),
+    destination_location = lead(origin_location)
+  ) %>% 
+  filter(row_number() != n())
+routes_raw
+```
+
+Since every row is a route now, we can fed this to `osrmRoute()`:
+
+```{r}
+u <- "https://routing.openstreetmap.de/routed-foot/"
+
+routes_geocoded_raw <- routes_raw %>% 
+  rowwise() %>% 
+  mutate(route = osrmRoute(
+    src = origin_geometry, 
+    dst = destination_geometry,
+     osrm.server = u) # adds bike data
+  )
+routes_geocoded_raw
+```
+
+Thats pretty need! Be aware that route is a nested data frame within routes_geocoded_raw.
+
+To get the desired format, we need to unnest the data frame:
+
+```{r}
+routes_geocoded <- routes_geocoded_raw %>% 
+  unnest(route, names_sep = "_") %>% 
+  st_set_geometry("route_geometry") %>% 
+  mutate(
+    distance_text = fmt_km(route_distance),
+    duration_text = fmt_duration(route_duration)
+  )
+```
+
+Let's visualize that again:
+
+```{r, warning=FALSE}
+ggplot() +
+  geom_sf(data = municipalities_tb, aes(geometry = geometry)) +
+  geom_sf(data = routes_geocoded, color = clrs[1]) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = all_stops_unique,
+    aes(label = location, geometry = geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  coord_sf(crs = st_crs("EPSG:25832")) + 
+  theme_roadtrip()
+
+```
+
+## Highlight municipalities
+
+Let's make the map a bit nicer to look at by highlighting the municipalities we pass through. We can do this by using the `st_intersection()` function from the `sf` package.
+
+```{r}
+# time to turn municialities into an sf object (prbly should have done this earlier)
+municipalities_highlighted <- municipalities_sf %>% 
+  mutate(visited = geometry %in% municipalities_sf[all_stops_unique, ]$geometry)
+
+ggplot() +
+  geom_sf(data = municipalities_highlighted, aes(geometry = geometry, fill = visited)) +
+  geom_sf(data = routes_geocoded, color = clrs[1]) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = all_stops_unique,
+    aes(label = location, geometry = geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  scale_fill_manual(values = c("grey90", "grey70"), guide = "none") +
+  coord_sf(crs = st_crs("EPSG:25832")) + 
+  theme_roadtrip()
+```
+
+## Summary statistics
+
+We can calculate the overall time and distance by simply adding up the respective columns:
+
+```{r}
+total_distance <- sum(routes_geocoded$route_distance) %>% fmt_km()
+total_distance
+
+total_time <- sum(routes_geocoded$route_duration) %>% fmt_duration()
+total_time
+# To do: time is calculated by 55 km/h
+```
+
+
+We can insert our statistics into the map:
+
+```{r}
+
+ggplot() +
+  geom_sf(data = municipalities_highlighted, aes(geometry = geometry, fill = visited)) +
+  geom_sf(data = routes_geocoded, color = clrs[1]) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = routes_geocoded,
+    aes(label = paste0(destination_location, " ", distance_text), geometry = destination_geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  scale_fill_manual(values = c("grey90", "grey70"), guide = "none") +
+  coord_sf(crs = st_crs("EPSG:25832")) + 
+  labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
+  theme_roadtrip()
+
+```
+
+## Faceting and Zooming
+
+We can just use any colum to facet the map. For example the direction column:
+
+```{r}
+
+ggplot() +
+  geom_sf(data = municipalities_highlighted, aes(geometry = geometry, fill = visited)) +
+  geom_sf(data = routes_geocoded, color = clrs[1]) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = routes_geocoded,
+    aes(label = paste0(destination_location, " ", distance_text), geometry = destination_geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  scale_fill_manual(values = c("grey90", "grey70"), guide = "none") +
+  coord_sf(crs = st_crs("EPSG:25832")) + 
+  labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
+  theme_roadtrip() +
+  facet_wrap(vars(direction), ncol = 1)
+
+```
+
+The more desired result is a map that shows each part of the trip in detail. First we need to extract the route for the specific part of the trip:
+
+```{r}
+route_day1 <- routes_geocoded %>% 
+  filter(direction == "There", part == 1 | part == 2)
+```
+
+And then send it into a pipeline that constructs the desired zoom level with a bounding box:
+
+```{r}
+bbox_nice <- route_day1 %>% 
+  st_bbox() %>%  # Extract the bounding box of the coordinates
+  st_as_sfc() %>%  # Convert the bounding box matrix back to an sf object
+  st_buffer(10) %>%  # Add 10 km to all sides
+  st_transform("EPSG:25832") %>%  # Switch to UTM 32
+  st_bbox() 
+```
+
+The plot for the first part of the trip is now:
+
+```{r}
+
+ggplot() +
+  geom_sf(data = municipalities_highlighted, aes(geometry = geometry, fill = visited)) +
+  geom_sf(data = route_day1, color = clrs[1]) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = route_day1,
+    aes(label = paste0(origin_location, " ", distance_text), geometry = origin_geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  scale_fill_manual(values = c("grey90", "grey70"), guide = "none") +
+  coord_sf(
+    xlim = c(bbox_nice["xmin"], bbox_nice["xmax"]), 
+    ylim = c(bbox_nice["ymin"], bbox_nice["ymax"]),
+    crs = st_crs("EPSG:25832")
+  ) +
+    labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
+  theme_roadtrip() 
+```
+
+That is nice. We can now generalize the code, extract the routes to OSMAnd and use OSM data to display the route with actual mapping.
+
+## Get OSM Tiles
+
+We can make our specific maps more informative by adding OSM tiles. For this we need to use the `ggspatial` package.
+
+```{r}
+# Get maptiles per bbox to save memory
+dc <- get_tiles(bbox_nice, provider = "OpenStreetMap")
+# And finally plot with ggplot2 + tidyterra
+
+ggplot() +
+  geom_spatraster_rgb(data = dc) +
+  geom_sf(data = route_day1, color = clrs[1], size = 10) +
+  geom_sf(data = all_stops_unique) +
+  geom_label_repel(
+    data = route_day1,
+    aes(label = distance_text, geometry = origin_geometry),
+    stat = "sf_coordinates", seed = 1234,
+    size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+  ) +
+  annotation_scale(
+    location = "bl", bar_cols = c("grey30", "white"),
+    unit_category = "metric", text_family = "Overpass"
+  ) +
+  coord_sf(
+    xlim = c(bbox_nice["xmin"], bbox_nice["xmax"]), 
+    ylim = c(bbox_nice["ymin"], bbox_nice["ymax"]),
+    crs = st_crs("EPSG:25832")
+  ) +
+  labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
+  theme_roadtrip() 
+
 ```

@@ -1,5 +1,5 @@
 ---
-title: "Building Bicycle Maps"
+title: "Building Touring Maps"
 author: "Johannes Wagner"
 date: "`r Sys.Date()`"
 ---
@@ -32,7 +32,7 @@ administrative units of interest.
 Addiotionally the CRS of the final map needs to be specified. The default value is WGS84.
 
 ```{r}
-load_spatial_data <- function(name = "VG250_KRS", column = "SN_L", filter_by = c("14", "15", "16"), crs = 25832) {
+load_spatial_data <- function(name = "VG250_KRS", column = "SN_L", filter_by = NULL, crs = 25832) {
 
   dir <- getwd()
   dir <- glue("{dir}/data/{name}.shp")
@@ -42,10 +42,15 @@ load_spatial_data <- function(name = "VG250_KRS", column = "SN_L", filter_by = c
   municipalities <- st_read(dir)
 
   municipalities_tb <- as_tibble(municipalities) %>%
-    select(!!column, geometry) %>%
-    filter(!!column %in% filter_by)  
-  
-  municipalities_sf <- st_as_sf(municipalities_tb, crs = crs)
+    select(!!column, geometry)
+
+  if (!is.null(filter_by)) {
+    municipalities_tb <- municipalities_tb %>%
+      filter(!!column %in% filter_by)
+  }
+
+  municipalities_sf <- st_as_sf(municipalities_tb)
+  municipalities_sf <- st_transform(municipalities_sf, crs = crs)
 
   return(municipalities_sf)
 }
@@ -57,31 +62,233 @@ We write a test to see if the function does what we want:
 
 ```
 
-## Providing a list of locations to visited
+## Geocoding a list of locations to visit
 
 The function [] takes a list of locations as input. Please be careful to choose unique identifiers for the
 places you want to visit.
 
+
+The package also provides the option to export the geocoded route as gpx track, which makes it easy to import
+into most travel apps.
+
 ```{r}
-geocode_locations -> function(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt")) {
+geocode_locations <- function(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832) {
 
   part_vector <- seq(1, length(locations))
 
   stops_to_geocode <- tibble(
     part = part_vector,
-    location = location_vector
+    location = locations,
   )
 
+  stops_geocoded <- stops_to_geocode %>%
+    geocode(location, method = "osm") %>%
+    filter(!is.na(long) & !is.na(lat)) %>%
+    st_as_sf(coords = c("long", "lat"), crs = st_crs("EPSG:4326"))
+
+  locations_sf <- stops_geocoded
+
+  crs <- st_crs(25832)
+  locations_sf["geometry"] <- lapply(locations_sf["geometry"], st_transform, crs) 
+
+  return(locations_sf)
 }
 
 ```
 
+## Find the best route
 
-## Geocoding
+We basically adapt the geocoded list of locations and use òsmRoute()` to find the best bicyle route for 
+our tour.
 
 ```{r}
+biketr <- function (route = locations_sf, option = "bike", write = FALSE) {
+
+  routes_raw <- route %>%
+    rename(
+      origin_geometry = geometry,
+      origin_location = location
+    ) %>%
+    mutate(
+      destination_geometry = lead(origin_geometry),
+      destination_location = lead(origin_location)
+    ) %>%
+    filter(row_number() != n())
+
+  if (option == "foot") {
+    option <- "https://routing.openstreetmap.de/routed-foot/"
+  } else {
+    option <- "https://routing.openstreetmap.de/routed-bike/"
+  }
+
+  routes_raw <- routes_raw %>%
+    rowwise() %>%
+    mutate(route =
+        osrmRoute(
+                  src = origin_geometry,
+                  dst = destination_geometry,
+                  osrm.server = option)
+    )
+
+  routes <- routes_raw %>%
+    unnest(route, names_sep = "_") %>%
+    st_set_geometry("route_geometry") %>%
+    mutate(
+      distance_text = fmt_km(route_distance),
+      duration_text = fmt_duration(route_duration)
+    )
+  
+  if (write == TRUE) {
+    st_write(obj = locations_sf,
+             dsn = "travelling_route.gpx",
+             layer = "route",
+             driver = "GPX",
+             delete_dsn = TRUE)
+  }
+  return(routes)
+}
 
 ```
 
 ## Formating and Ploting
 
+The main goal is to make a nice visual map with our route and detailed maps for every part of 
+the trip using OSM data. This can be done by providing the function `travel_map` with a geolocated
+sf object for the route and one as a basemap.
+
+```{r}
+traveling_map <- function(municipalities_sf, locations_sf, routes) {
+  theme_roadtrip <- function() {
+    theme_void(base_family = "Overpass Light") +
+      theme(
+        plot.title = element_text(family = "Overpass", face = "bold", hjust = 0.5),
+        strip.text = element_text(
+          family = "Overpass ExtraBold", face = "plain",
+          size = rel(1.1), hjust = 0.5)
+      )
+  }
+
+  total_distance <- sum(routes$route_distance) %>% fmt_km()
+  total_time <- sum(routes$route_duration) %>% fmt_duration()
+
+  municipalities_highlighted <- municipalities_sf %>%
+    mutate(visited = geometry %in% municipalities_sf[locations_sf, ]$geometry)
+
+  clrs <- NatParksPalettes::natparks.pals("Yellowstone")
+
+  p <- ggplot() +
+    geom_sf(data = municipalities_highlighted, aes(geometry = geometry, fill = visited)) +
+    geom_sf(data = routes, color = clrs[1]) +
+    geom_sf(data = locations_sf) +
+    geom_label_repel(
+      data = routes,
+      aes(label = paste0(destination_location, " ", distance_text), geometry = destination_geometry),
+      stat = "sf_coordinates", seed = 1234,
+      size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+    ) +
+    annotation_scale(
+      location = "bl", bar_cols = c("grey30", "white"),
+      unit_category = "metric", text_family = "Overpass"
+    ) +
+    scale_fill_manual(values = c("grey90", "grey70"), guide = "none") +
+    coord_sf(crs = st_crs("EPSG:25832")) + 
+    labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
+    theme_roadtrip()
+  
+  ggsave(filename = "/data/route_overview.png", plot = p, width = 6, height = 4, dpi = 300)
+
+  return(p)
+}
+
+traveling_map_daily <- function(municipalities_sf, locations_sf, routes, day = 1) {
+  theme_roadtrip <- function() {
+    theme_void(base_family = "Overpass Light") +
+    theme(
+      plot.title = element_text(family = "Overpass", face = "bold", hjust = 0.5),
+      strip.text = element_text(
+        family = "Overpass ExtraBold",
+        face = "plain",
+        size = rel(1.1), hjust = 0.5)
+      )
+  }
+
+  total_distance <- sum(routes$route_distance) %>% fmt_km()
+  total_time <- sum(routes$route_duration) %>% fmt_duration()
+
+  municipalities_highlighted <- municipalities_sf %>% 
+    mutate(visited = geometry %in% municipalities_sf[locations_sf, ]$geometry)
+
+  route_day <- routes %>% 
+    filter(part == day | part == day + 1)
+
+  bbox_nice <- route_day %>% 
+    st_bbox() %>%
+    st_as_sfc() %>%
+    st_buffer(10) %>%
+    st_transform("EPSG:25832") %>%
+    st_bbox()
+
+  clrs <- NatParksPalettes::natparks.pals("Yellowstone")
+
+  dc <- get_tiles(bbox_nice, provider = "OpenStreetMap")
+
+  p <- ggplot() +
+    geom_spatraster_rgb(data = dc) +
+    geom_sf(data = route_day, color = clrs[1], size = 10) +
+    geom_sf(data = locations_sf) +
+    geom_label_repel(
+      data = route_day,
+      aes(label = distance_text, geometry = origin_geometry),
+      stat = "sf_coordinates", seed = 1234,
+      size = 3, segment.color = clrs[3], min.segment.length = 0, max.overlaps = 20
+    ) +
+    annotation_scale(
+      location = "bl", bar_cols = c("grey30", "white"),
+      unit_category = "metric", text_family = "Overpass"
+    ) +
+    coord_sf(
+      xlim = c(bbox_nice["xmin"], bbox_nice["xmax"]), 
+      ylim = c(bbox_nice["ymin"], bbox_nice["ymax"]),
+      crs = st_crs("EPSG:25832")
+    ) +
+    labs(title = glue("{total_distance}; and {total_time} with the bike. Bring it on.")) +
+    theme_roadtrip()
+
+  ggsave(filename = "route_part.png", plot = p, width = 6, height = 4, dpi = 300)
+
+  return(p)
+}
+
+```
+
+## Helper functions
+
+Here we define a few helper functions that we use at various points of our package.
+
+```{r}
+fmt_duration <- function(x) {
+  # Round to the nearest 15 minutes
+  n_seconds <- round(seconds(x * 60) / (15 * 60)) * (15 * 60)
+  n_seconds <- seconds_to_period(n_seconds)
+
+  out <- map_chr(n_seconds, \(n) {
+    if (seconds(n) <= 59) {
+      # If this is less than an hour, don't format anything with hours
+      glue("{MM} minutes", MM = minute(n))
+    } else {
+      extra_day_hours <- day(n) * 24
+
+      glue("{HH} hour{s} {MM} minutes",
+        HH = scales::label_comma()(hour(n) + extra_day_hours),
+        MM = minute(n),
+        s = ifelse(hour(n) == 1, "", "s")
+      )
+    }
+  })
+
+  return(out)
+}
+
+fmt_km <- scales::label_number(accuracy = 1, suffix = " km", big.mark = ",")
+
+```

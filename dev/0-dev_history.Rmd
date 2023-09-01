@@ -32,6 +32,54 @@ usethis::use_pipe()
 
 Start by inflating `dev/flat_save_data.Rmd`:
 
+# Inflate save_data.Rmd
+
+Start by inflating `dev/save_data.Rmd`:
+
+```{r development-inflate, eval=FALSE}
+# Run but keep eval=FALSE to avoid infinite loop
+# Execute in the console directly
+fusen::inflate(flat_file = "dev/save_data.Rmd",
+               vignette_name = "dev-save_data",
+               overwrite = T)
+
+```
+
+
+# Including datasets
+
+The datasets created in the `save_data.Rmd` have still to be saved into the
+`data/` folder of the package. This will make the datasets available using
+`data("VG250_KRS")`. But the package has to be inflated once at least
+before being able to save the data and document it. We are going to knit the
+vignette generated from `save_data.Rmd` for this. This vignette contains all the
+calls needed to save the data. Then, we are going to use `usethis::use_data()`
+to save the datasets. We knit the vignette into a temporary file using `tempfile()`
+because we’re not interested in the output itself, but simply want the datasets
+to be generated. When using `knitr::knit()`, every object that is created in the 
+knitted vignette would be made available in the global environment. In this case,
+knitting the vinette would make `commune_level_data`, `country_level_data` and
+`communes` available in the global environment, which in turn would make it possible
+to save using `usethis::use_data(commune_level_data)`. But we don’t want to clutter
+the global environment with these datasets, we only want to save them.
+
+So to avoid cluttering the global environment, we run the calls inside `local()`.
+`local()` runs code in a temporary environment which is then discarded. This makes
+it possible to turn this operation pure:
+
+```{r}
+local({
+  knitr::knit("vignettes/dev-save_data.Rmd", output = tempfile())
+  usethis::use_data(commune_level_data, overwrite = TRUE)
+  usethis::use_data(country_level_data, overwrite = TRUE)
+  usethis::use_data(communes, overwrite = TRUE)
+})
+
+```
+
+# Inflate package
+
+
 ```{r development-inflate, eval=FALSE}
 # Run but keep eval=FALSE to avoid infinite loop
 # Execute in the console directly

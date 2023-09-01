@@ -56,7 +56,7 @@ geocode_locations <- function(locations = c("Leipzig", "Lützen", "Weißenfels",
 load_spatial_data <- function(name = "VG250_KRS", column = "SN_L", filter_by = NULL, crs = 25832) {
 
   dir <- getwd()
-  dir <- glue::glue("{dir}/data/{name}.shp")
+  dir <- glue::glue("{dir}/data/{name}.geojson")
 
   column <- ensym(column)
 

@@ -43,3 +43,9 @@ data <- load_spatial_data(name = "VG250_KRS", column = "SN_L", filter_by = NULL,
 head(data)
 ```
 
+```{r examples-geocode_locations}
+data_geocode <- geocode_locations(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832)
+
+head(data_geocode)
+```
+

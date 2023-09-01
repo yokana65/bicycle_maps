@@ -10,3 +10,14 @@ test_types <- function() {
 test_that("load_spatial_dat works", {
   test_types()
 })
+
+# We want to check if the retrieved dataset has the desired structure
+test_types <- function() {
+  data_geocode <- geocode_locations(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832)
+  expect_is(data, "sf") 
+  expect_true("geometry" %in% names(data_geocde))
+}
+
+test_that("geocode_locations works", {
+  test_types()
+})

@@ -13,7 +13,8 @@ Imports:
     magrittr,
     rlang,
     sf,
-    tibble
+    tibble,
+    tidygeocoder
 Suggests: 
     knitr,
     rmarkdown,

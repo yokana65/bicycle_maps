@@ -103,6 +103,65 @@ test_that("load_spatial_dat works", {
 })
 ```
 
+
+```{r function-geocode_locations}
+#' load_spatial_data Get the spatial data
+#'
+#' @importFrom tidygeocoder geocode
+#' @importFrom sf st_as_sf st_crs st_transform
+#' @importFrom dplyr filter
+#' @importFrom tibble tibble
+#' @return A data frame of class sf
+#' @export
+#'
+#' @examples
+
+
+geocode_locations <- function(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832) {
+
+  part_vector <- seq(1, length(locations))
+
+  stops_to_geocode <- tibble(
+    part = part_vector,
+    location = locations,
+  )
+
+  stops_geocoded <- stops_to_geocode %>%
+    geocode(location, method = "osm") %>%
+    filter(!is.na(long) & !is.na(lat)) %>%
+    st_as_sf(coords = c("long", "lat"), crs = st_crs("EPSG:4326"))
+
+  locations_sf <- stops_geocoded
+
+  crs <- st_crs(25832)
+  locations_sf["geometry"] <- lapply(locations_sf["geometry"], st_transform, crs) 
+
+  return(locations_sf)
+}
+
+```
+
+
+```{r examples-geocode_locations}
+data_geocode <- geocode_locations(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832)
+
+head(data_geocode)
+```
+
+```{r tests-geocode_locations}
+# We want to check if the retrieved dataset has the desired structure
+test_types <- function() {
+  data_geocode <- geocode_locations(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832)
+  expect_is(data_geocode, "sf") 
+  expect_true("geometry" %in% names(data_geocde))
+}
+
+test_that("geocode_locations works", {
+  test_types()
+})
+```
+
+
 ```{r development-inflate, eval=FALSE}
 # Run but keep eval=FALSE to avoid infinite loop
 # Execute in the console directly

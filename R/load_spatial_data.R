@@ -2,6 +2,44 @@
 
 #' load_spatial_data Get the spatial data
 #'
+#' @importFrom tidygeocoder geocode
+#' @importFrom sf st_as_sf st_crs st_transform
+#' @importFrom dplyr filter
+#' @importFrom tibble tibble
+#' @return A data frame of class sf
+#' @export
+#'
+#' @examples
+
+
+#' data_geocode <- geocode_locations(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832)
+#'
+#' head(data_geocode)
+geocode_locations <- function(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832) {
+
+  part_vector <- seq(1, length(locations))
+
+  stops_to_geocode <- tibble(
+    part = part_vector,
+    location = locations,
+  )
+
+  stops_geocoded <- stops_to_geocode %>%
+    geocode(location, method = "osm") %>%
+    filter(!is.na(long) & !is.na(lat)) %>%
+    st_as_sf(coords = c("long", "lat"), crs = st_crs("EPSG:4326"))
+
+  locations_sf <- stops_geocoded
+
+  crs <- st_crs(25832)
+  locations_sf["geometry"] <- lapply(locations_sf["geometry"], st_transform, crs) 
+
+  return(locations_sf)
+}
+
+
+#' load_spatial_data Get the spatial data
+#'
 #' @importFrom glue glue
 #' @importFrom rlang ensym
 #' @importFrom sf st_read st_as_sf st_transform

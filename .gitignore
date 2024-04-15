@@ -9,7 +9,11 @@
 *.user
 *.userosscache
 *.sln.docstates
-
+*.vscode
+*.here 
+*.lintr 
+*.Rbuildignore
+*.Rprofile
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
@@ -396,3 +400,4 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+inst/doc

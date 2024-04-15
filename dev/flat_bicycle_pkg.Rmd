@@ -1,0 +1,169 @@
+---
+title: "Touring Maps"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r development, include=FALSE}
+library(testthat)
+library(tidyverse)
+library(sf)
+library(tidygeocoder)
+library(osrm)
+library(maptiles)
+library(ggrepel)
+library(glue)
+library(rlang)
+library(scales)
+library(patchwork)
+library(tidyterra)
+library(ggspatial)
+library(httr)
+```
+
+<!--
+ You need to run the 'description' chunk in the '0-dev_history.Rmd' file before continuing your code there.
+-->
+
+```{r development-load}
+# Load already included functions if relevant
+pkgload::load_all(export_all = FALSE)
+```
+
+## Loading the data
+
+At this point the package expects a shapefile for administrative boundaries. This data can be found
+with local or national authorities or on specialized websites like https://www.diva-gis.org/.
+
+ The Shapefile has to be stored under `data/`in the project directory and needs to contain a column with
+ a geometry, the administrative level of interest (for example districts) and a unique identifier for the 
+ administrative units of interest.
+
+ Additionally the CRS of the final map needs to be specified. The default value is WGS84.
+
+```{r function-load_spatial_data}
+#' load_spatial_data Get the spatial data
+#'
+#' @importFrom glue glue
+#' @importFrom rlang ensym
+#' @importFrom sf st_read st_as_sf st_transform
+#' @importFrom dplyr select filter
+#' @importFrom tibble as_tibble
+#' @return A data frame
+#' @export
+#'
+#' @examples
+
+load_spatial_data <- function(name = "VG250_KRS", column = "SN_L", filter_by = NULL, crs = 25832) {
+
+  dir <- getwd()
+  dir <- glue::glue("{dir}/data/{name}.geojson")
+
+  column <- ensym(column)
+
+  municipalities <- st_read(dir)
+
+  municipalities_tb <- as_tibble(municipalities) %>%
+    select(!!column, geometry)
+
+  if (!is.null(filter_by)) {
+    municipalities_tb <- municipalities_tb %>%
+      filter(!!column %in% filter_by)
+  }
+
+  municipalities_sf <- st_as_sf(municipalities_tb)
+  municipalities_sf <- st_transform(municipalities_sf, crs = crs)
+
+  # # save municipalities_sf as rds
+  # write_rds(municipalities_sf, glue::glue("{dir}/data/{name}.rds"))
+
+
+  return(municipalities_sf)
+}
+```
+
+
+```{r examples-load_spatial_data}
+data <- load_spatial_data(name = "VG250_KRS", column = "SN_L", filter_by = NULL, crs = 25832)
+
+head(data)
+```
+
+```{r tests-load_spatial_data}
+# We want to check if the retrieved dataset has the desired structure
+test_types <- function() {
+  data <- load_spatial_data(name = "VG250_KRS", column = "SN_L", filter_by = NULL, crs = 25832)
+  expect_is(data, "sf") 
+  expect_true("geometry" %in% names(data))
+}
+
+test_that("load_spatial_dat works", {
+  test_types()
+})
+```
+
+
+```{r function-geocode_locations}
+#' load_spatial_data Get the spatial data
+#'
+#' @importFrom tidygeocoder geocode
+#' @importFrom sf st_as_sf st_crs st_transform
+#' @importFrom dplyr filter
+#' @importFrom tibble tibble
+#' @return A data frame of class sf
+#' @export
+#'
+#' @examples
+
+
+geocode_locations <- function(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832) {
+
+  part_vector <- seq(1, length(locations))
+
+  stops_to_geocode <- tibble(
+    part = part_vector,
+    location = locations,
+  )
+
+  stops_geocoded <- stops_to_geocode %>%
+    geocode(location, method = "osm") %>%
+    filter(!is.na(long) & !is.na(lat)) %>%
+    st_as_sf(coords = c("long", "lat"), crs = st_crs("EPSG:4326"))
+
+  locations_sf <- stops_geocoded
+
+  crs <- st_crs(25832)
+  locations_sf["geometry"] <- lapply(locations_sf["geometry"], st_transform, crs) 
+
+  return(locations_sf)
+}
+
+```
+
+
+```{r examples-geocode_locations}
+data_geocode <- geocode_locations(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832)
+
+head(data_geocode)
+```
+
+```{r tests-geocode_locations}
+# We want to check if the retrieved dataset has the desired structure
+test_types <- function() {
+  data_geocode <- geocode_locations(locations = c("Leipzig", "Lützen", "Weißenfels", "Naumburg", "Bad Kösen", "bad Sulza", "Auerstedt"), crs = 25832)
+  expect_is(data_geocode, "sf") 
+  expect_true("geometry" %in% names(data_geocde))
+}
+
+test_that("geocode_locations works", {
+  test_types()
+})
+```
+
+
+```{r development-inflate, eval=FALSE}
+# Run but keep eval=FALSE to avoid infinite loop
+# Execute in the console directly
+fusen::inflate(flat_file = "dev/flat_bicycle_pkg.Rmd", vignette_name = "Minimal")
+```

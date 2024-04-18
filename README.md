@@ -4,6 +4,14 @@ The aim of this package is to draw tour maps given a list of desired locations t
 
 It needs a shapefile with the underlying spatial information and a column that lists the regional areas to visit.
 
+The package can be build from the directory by running:
+
+```R
+fusen::inflate(flat_file = "dev/flat_bicycle_pkg.Rmd",
+               vignette_name = "dev-flat_bicycle_pkg",
+               overwrite = T)
+```
+
 From there it provides the following functions:
 
 ## Load spatial data

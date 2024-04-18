@@ -55,14 +55,9 @@ geocode_locations <- function(locations = c("Leipzig", "Lützen", "Weißenfels",
 #' head(data)
 load_spatial_data <- function(name = "VG250_KRS", column = "SN_L", filter_by = NULL, crs = 25832) {
 
-  # dir <- getwd()
-  # dir <- glue::glue("{dir}/data/{name}.geojson")
-  file_path <- system.file("data", paste0(name, ".geojson"), package = "bicycle.maps")
-  
-  if (file_path == "") {
-    stop("File not found: ", name, ".geojson")
-  }
-  
+  dir <- system.file("data", package = "YourPackageName")
+  dir <- glue::glue("{dir}/{name}.geojson")
+
   column <- ensym(column)
 
   municipalities <- st_read(dir)

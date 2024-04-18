@@ -12,6 +12,8 @@ fusen::inflate(flat_file = "dev/flat_bicycle_pkg.Rmd",
                overwrite = T)
 ```
 
+This builds the package with documentation and code from the specified Markdown File.
+
 From there it provides the following functions:
 
 ## Load spatial data
